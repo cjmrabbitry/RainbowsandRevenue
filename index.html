@@ -516,7 +516,23 @@ async function signOut(){
   currentUser = null;
   renderAuthScreen();
 }
-function authScreenHTML(mode, errorMsg){
+function authScreenHTML(mode, errorMsg, infoMsg){
+  const heading = mode==='signup' ? "Welcome! Let's set you up ✨"
+    : mode==='forgot' ? "Forgot it? No worries ✨"
+    : mode==='reset' ? "Pick a new password ✨"
+    : "Let's make some magic (and quota) happen ✨";
+  const btnLabel = mode==='signup' ? 'Create account 🎉'
+    : mode==='forgot' ? 'Send reset link 💌'
+    : mode==='reset' ? 'Save new password ✨'
+    : "Let's go 🌈";
+  const btnAction = mode==='signup' ? 'doSignUp()'
+    : mode==='forgot' ? 'doForgot()'
+    : mode==='reset' ? 'doResetPassword()'
+    : 'doSignIn()';
+  const links = mode==='signup' ? `Already set up? <a class="linklike" onclick="renderAuthScreen('signin')">Sign in</a>`
+    : mode==='forgot' ? `<a class="linklike" onclick="renderAuthScreen('signin')">← Back to sign in</a>`
+    : mode==='reset' ? ''
+    : `New here? <a class="linklike" onclick="renderAuthScreen('signup')">Create an account</a><br><a class="linklike" style="display:inline-block;margin-top:8px;" onclick="renderAuthScreen('forgot')">Forgot password?</a>`;
   return `
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 20px;
       background:radial-gradient(circle at 20% 15%, color-mix(in srgb, var(--blush-raw) 16%, transparent) 0%, transparent 45%),
@@ -532,30 +548,32 @@ function authScreenHTML(mode, errorMsg){
           <img src="data:image/png;base64,${LOGO_B64}" alt="Rainbows and Revenue" style="width:130px;height:130px;display:block;margin:0 auto 14px;
             filter:drop-shadow(0 8px 18px rgba(180,123,51,0.25));" />
           <h1 style="font-family:Georgia, 'Iowan Old Style', 'Times New Roman', serif;font-style:italic;font-size:15px;color:var(--muted);
-            margin:0 0 24px;font-weight:400;">${mode==='signup' ? "Welcome! Let's set you up ✨" : "Let's make some magic (and quota) happen ✨"}</h1>
-          <div class="field" style="text-align:left;">
+            margin:0 0 24px;font-weight:400;">${heading}</h1>
+          ${mode!=='reset' ? `<div class="field" style="text-align:left;">
             <label>Email</label>
             <input id="auth_email" type="email" data-autofocus />
-          </div>
-          <div class="field" style="text-align:left;">
-            <label>Password</label>
-            <input id="auth_password" type="password" placeholder="••••••••" />
-          </div>
+          </div>` : ''}
+          ${mode!=='forgot' ? `<div class="field" style="text-align:left;">
+            <label>${mode==='reset' ? 'New password' : 'Password'}</label>
+            <input id="auth_password" type="password" placeholder="••••••••" ${mode==='reset' ? 'data-autofocus' : ''} />
+          </div>` : ''}
           ${errorMsg ? `<div style="color:var(--red);font-size:12.5px;margin-bottom:10px;">${esc(errorMsg)}</div>` : ''}
-          <button class="btn primary fab-add auth-cute-btn" onclick="${mode==='signup' ? 'doSignUp()' : 'doSignIn()'}">${mode==='signup' ? 'Create account 🎉' : "Let's go 🌈"}</button>
-          <p style="font-size:12px;color:var(--muted-2);margin-top:14px;">
-            ${mode==='signup'
-              ? `Already set up? <a class="linklike" onclick="renderAuthScreen('signin')">Sign in</a>`
-              : `New here? <a class="linklike" onclick="renderAuthScreen('signup')">Create an account</a>`}
-          </p>
+          ${infoMsg ? `<div style="color:var(--sage-raw);font-size:12.5px;margin-bottom:10px;font-weight:600;">${esc(infoMsg)}</div>` : ''}
+          <button class="btn primary fab-add auth-cute-btn" onclick="${btnAction}">${btnLabel}</button>
+          ${links ? `<p style="font-size:12px;color:var(--muted-2);margin-top:14px;">${links}</p>` : ''}
         </div>
         <p style="text-align:center;font-size:11px;color:var(--muted-2);margin-top:16px;">just you, your accounts, and a little sparkle</p>
       </div>
     </div>
   `;
 }
-function renderAuthScreen(mode, errorMsg){
-  document.getElementById('app').innerHTML = authScreenHTML(mode || 'signin', errorMsg);
+// Set when the page was opened from a password-reset email link
+let recoveryMode = /type=recovery/.test(location.hash);
+sb.auth.onAuthStateChange((event)=>{
+  if(event === 'PASSWORD_RECOVERY'){ recoveryMode = true; renderAuthScreen('reset'); }
+});
+function renderAuthScreen(mode, errorMsg, infoMsg){
+  document.getElementById('app').innerHTML = authScreenHTML(mode || 'signin', errorMsg, infoMsg);
   const f = document.querySelector('[data-autofocus]');
   if(f) f.focus();
 }
@@ -577,8 +595,26 @@ async function doSignUp(){
   currentUser = data.user;
   await loadFromSupabase();
 }
+async function doForgot(){
+  const email = document.getElementById('auth_email').value.trim();
+  if(!email){ renderAuthScreen('forgot', 'Enter your email first.'); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  if(error){ renderAuthScreen('forgot', error.message); return; }
+  renderAuthScreen('forgot', null, 'Check your email for a reset link, and open it on this device.');
+}
+async function doResetPassword(){
+  const password = document.getElementById('auth_password').value;
+  if(password.length < 6){ renderAuthScreen('reset', 'Password needs at least 6 characters.'); return; }
+  const { data, error } = await sb.auth.updateUser({ password });
+  if(error){ renderAuthScreen('reset', error.message); return; }
+  recoveryMode = false;
+  try{ history.replaceState(null, '', location.pathname); }catch(e){}
+  currentUser = data.user;
+  await loadFromSupabase();
+}
 async function load(){
   const { data: { session } } = await sb.auth.getSession();
+  if(recoveryMode){ renderAuthScreen('reset'); return; }
   if(session && session.user){
     currentUser = session.user;
     await loadFromSupabase();
